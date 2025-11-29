@@ -1,9 +1,9 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { AdData, AnalysisResult } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import StatsCard from './StatsCard';
-import { DollarSign, TrendingUp, Target, Activity, RefreshCw, Search, MessageCircle, Users } from 'lucide-react';
+import { DollarSign, TrendingUp, Target, Activity, RefreshCw, Search, MessageCircle, Users, ChevronDown, ChevronUp, Eye, MousePointer2 } from 'lucide-react';
 
 interface AnalysisViewProps {
   data: AdData[];
@@ -13,10 +13,16 @@ interface AnalysisViewProps {
 
 const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
   // Determine if this is an e-commerce (ROAS based) or Lead/Message (CPA based) view
   const isEcommerce = analysis.summary.avgRoas > 0.5 || analysis.summary.dominantResultType === 'purchase';
+
+  // Reset expanded row when search changes
+  useEffect(() => {
+    setExpandedRow(null);
+  }, [searchTerm]);
 
   // Prepare data for chart (Top 10 Spenders)
   const chartData = useMemo(() => {
@@ -37,6 +43,14 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
     setSearchTerm(adName);
     if (tableRef.current) {
       tableRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const toggleRow = (index: number) => {
+    if (expandedRow === index) {
+      setExpandedRow(null);
+    } else {
+      setExpandedRow(index);
     }
   };
 
@@ -257,35 +271,92 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
             <tbody className="divide-y divide-gray-100">
               {filteredData.length > 0 ? (
                 filteredData.map((item, index) => (
-                  <tr 
-                    key={index} 
-                    className={`hover:bg-indigo-50 transition-colors`}
-                  >
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900 max-w-xs truncate" title={item.adName}>
-                      {item.adName}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      ${item.amountSpent.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-bold">
-                       {isEcommerce ? (
-                            <span className={`${item.roas >= 2 ? 'text-green-600' : item.roas >= 1 ? 'text-orange-500' : 'text-red-500'}`}>
-                                {item.roas.toFixed(2)}x
-                            </span>
-                       ) : (
-                            <span className="text-gray-700">{item.ctr.toFixed(2)}%</span>
-                       )}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {item.results}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      ${item.costPerResult.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {isEcommerce ? `${item.ctr.toFixed(2)}%` : item.clicks}
-                    </td>
-                  </tr>
+                  <React.Fragment key={index}>
+                    <tr 
+                      onClick={() => toggleRow(index)}
+                      className={`cursor-pointer transition-colors ${expandedRow === index ? 'bg-indigo-50 border-l-4 border-indigo-500' : 'hover:bg-gray-50'}`}
+                    >
+                      <td className="px-6 py-4 text-sm font-medium text-gray-900 max-w-xs truncate flex items-center gap-2" title={item.adName}>
+                         {expandedRow === index ? <ChevronUp size={16} className="text-indigo-600 min-w-4" /> : <ChevronDown size={16} className="text-gray-400 min-w-4" />}
+                         <span className="truncate">{item.adName}</span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        ${item.amountSpent.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 text-sm font-bold">
+                        {isEcommerce ? (
+                              <span className={`${item.roas >= 2 ? 'text-green-600' : item.roas >= 1 ? 'text-orange-500' : 'text-red-500'}`}>
+                                  {item.roas.toFixed(2)}x
+                              </span>
+                        ) : (
+                              <span className="text-gray-700">{item.ctr.toFixed(2)}%</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        {item.results}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        ${item.costPerResult.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        {isEcommerce ? `${item.ctr.toFixed(2)}%` : item.clicks}
+                      </td>
+                    </tr>
+                    
+                    {/* Expanded Detail Row */}
+                    {expandedRow === index && (
+                      <tr className="bg-indigo-50/50">
+                        <td colSpan={6} className="px-6 py-4 border-t border-indigo-100">
+                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-fade-in">
+                              <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
+                                <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                  <Eye size={14} />
+                                  <span>Impressions</span>
+                                </div>
+                                <div className="font-bold text-gray-800 text-lg">
+                                  {item.impressions.toLocaleString()}
+                                </div>
+                              </div>
+
+                              <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
+                                <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                  <MousePointer2 size={14} />
+                                  <span>Clicks</span>
+                                </div>
+                                <div className="font-bold text-gray-800 text-lg">
+                                  {item.clicks.toLocaleString()}
+                                </div>
+                              </div>
+
+                              <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
+                                <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                  <span>💰 CPC</span>
+                                </div>
+                                <div className="font-bold text-gray-800 text-lg">
+                                  ${item.cpc.toFixed(2)}
+                                </div>
+                              </div>
+
+                              <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
+                                <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                  <span>📊 CPM (Est.)</span>
+                                </div>
+                                <div className="font-bold text-gray-800 text-lg">
+                                  ${item.impressions > 0 ? ((item.amountSpent / item.impressions) * 1000).toFixed(2) : '0.00'}
+                                </div>
+                              </div>
+                              
+                              <div className="col-span-2 md:col-span-4 mt-2">
+                                <p className="text-xs text-gray-400">
+                                  Campaign: <span className="font-medium text-gray-600">{item.campaignName}</span> | 
+                                  AdSet: <span className="font-medium text-gray-600">{item.adSetName}</span>
+                                </p>
+                              </div>
+                           </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))
               ) : (
                 <tr>
