@@ -1,29 +1,49 @@
 import { AdData, AnalysisResult } from '../types';
 
 export const analyzeAds = async (data: AdData[]): Promise<AnalysisResult> => {
-  // Simulate async processing to allow UI to render loading state
+  // Simulate async processing
   await new Promise(resolve => setTimeout(resolve, 100));
 
-  // 1. Calculate Summary Stats (Global)
+  // --- 1. Global Metrics Calculation ---
   const totalSpent = data.reduce((sum, item) => sum + item.amountSpent, 0);
   const totalRevenue = data.reduce((sum, item) => sum + (item.amountSpent * item.roas), 0);
   const totalResults = data.reduce((sum, item) => sum + item.results, 0);
+  
+  // Averages
   const avgRoas = totalSpent > 0 ? totalRevenue / totalSpent : 0;
   const avgCpa = totalResults > 0 ? totalSpent / totalResults : 0;
   
-  // Detect Context (Optimized Performance)
+  // Detect Context
   const counts: Record<string, number> = {};
   for (const item of data) {
     counts[item.resultType] = (counts[item.resultType] || 0) + 1;
   }
-  
   const dominantResultType = Object.keys(counts).reduce((a, b) => 
     (counts[a] > counts[b] ? a : b), 'generic'
   );
   
   const isEcommerce = avgRoas > 0.5 || dominantResultType === 'purchase';
 
-  // --- 2. AdSet Level Aggregation ---
+  // --- 2. Dynamic Thresholds ---
+  // We use the account average as a baseline.
+  // Good = Significantly better than average.
+  // Bad = Significantly worse than average.
+  
+  const roasThreshold = {
+      good: avgRoas * 1.2, // 20% better than avg
+      bad: avgRoas * 0.8   // 20% worse than avg
+  };
+  
+  const cpaThreshold = {
+      good: avgCpa > 0 ? avgCpa * 0.8 : 0, // 20% cheaper than avg
+      bad: avgCpa > 0 ? avgCpa * 1.3 : 0   // 30% more expensive than avg
+  };
+
+  // Spend Significance: Don't judge too early.
+  // If avgCpa exists, use it. Otherwise use average spend per ad as a proxy.
+  const significanceThreshold = avgCpa > 0 ? avgCpa : (totalSpent / (data.length || 1));
+
+  // --- 3. Aggregation (AdSet & Creative) ---
   interface AggregatedMetrics {
     name: string;
     spend: number;
@@ -31,229 +51,172 @@ export const analyzeAds = async (data: AdData[]): Promise<AnalysisResult> => {
     results: number;
     impressions: number;
     clicks: number;
+    roas: number;
+    cpa: number;
+    ctr: number;
+    cpc: number;
   }
+
+  const aggregate = (keyFn: (d: AdData) => string) => {
+    const map: Record<string, AggregatedMetrics> = {};
+    data.forEach(item => {
+        const key = keyFn(item);
+        if (!map[key]) {
+            map[key] = { 
+                name: key, spend: 0, revenue: 0, results: 0, 
+                impressions: 0, clicks: 0, roas: 0, cpa: 0, ctr: 0, cpc: 0 
+            };
+        }
+        map[key].spend += item.amountSpent;
+        map[key].revenue += (item.amountSpent * item.roas);
+        map[key].results += item.results;
+        map[key].impressions += item.impressions;
+        map[key].clicks += item.clicks;
+    });
+    return Object.values(map).map(item => ({
+        ...item,
+        roas: item.spend > 0 ? item.revenue / item.spend : 0,
+        cpa: item.results > 0 ? item.spend / item.results : 0,
+        ctr: item.impressions > 0 ? (item.clicks / item.impressions) * 100 : 0,
+        cpc: item.clicks > 0 ? item.spend / item.clicks : 0
+    }));
+  };
+
+  const adSets = aggregate(d => d.adSetName || 'Unknown AdSet');
+  const creatives = aggregate(d => d.adName || 'Unknown Creative');
+
+  // --- 4. Deep Segmentation Logic (The Core) ---
   
-  const adSetMap: Record<string, AggregatedMetrics> = {};
-  // --- New: Creative Level (Ad Name) Aggregation ---
-  const creativeMap: Record<string, AggregatedMetrics> = {};
-
-  data.forEach(item => {
-    // AdSet Aggregation
-    const setKey = item.adSetName || 'Unknown AdSet';
-    if (!adSetMap[setKey]) {
-      adSetMap[setKey] = { name: setKey, spend: 0, revenue: 0, results: 0, impressions: 0, clicks: 0 };
-    }
-    adSetMap[setKey].spend += item.amountSpent;
-    adSetMap[setKey].revenue += (item.amountSpent * item.roas);
-    adSetMap[setKey].results += item.results;
-    adSetMap[setKey].impressions += item.impressions;
-    adSetMap[setKey].clicks += item.clicks;
-
-    // Creative Aggregation (Grouping by Ad Name)
-    const creativeKey = item.adName || 'Unknown Creative';
-    if (!creativeMap[creativeKey]) {
-        creativeMap[creativeKey] = { name: creativeKey, spend: 0, revenue: 0, results: 0, impressions: 0, clicks: 0 };
-    }
-    creativeMap[creativeKey].spend += item.amountSpent;
-    creativeMap[creativeKey].revenue += (item.amountSpent * item.roas);
-    creativeMap[creativeKey].results += item.results;
-    creativeMap[creativeKey].impressions += item.impressions;
-    creativeMap[creativeKey].clicks += item.clicks;
-  });
-
-  const calculateMetrics = (item: AggregatedMetrics) => ({
-    ...item,
-    roas: item.spend > 0 ? item.revenue / item.spend : 0,
-    cpa: item.results > 0 ? item.spend / item.results : 0,
-    ctr: item.impressions > 0 ? (item.clicks / item.impressions) * 100 : 0
-  });
-
-  const adSets = Object.values(adSetMap).map(calculateMetrics);
-  const creatives = Object.values(creativeMap).map(calculateMetrics);
-
-  // --- 3. Deep Analysis Logic ---
+  // A. Zombies: Spent money (significant amount) but 0 results.
+  const zombies = data.filter(d => d.results === 0 && d.amountSpent > (significanceThreshold * 0.5));
   
-  // Thresholds
-  const highCpaThreshold = avgCpa > 0 ? avgCpa * 1.3 : 0; // 30% more expensive than average
-  const goodCpaThreshold = avgCpa > 0 ? avgCpa * 0.8 : 0; // 20% cheaper than average
-  const minSpendForDecision = data.length > 0 ? (totalSpent / data.length) * 0.2 : 0;
-
-  // Categorize Ads (Individual Rows)
-  const zeroResultAds = data.filter(d => d.amountSpent > minSpendForDecision && d.results === 0);
-  
-  const badAds = data.filter(d => {
-    if (d.amountSpent < minSpendForDecision) return false;
-    if (isEcommerce) {
-        return d.roas < 1.0 || (d.roas < avgRoas * 0.7);
-    } else {
-        return d.costPerResult > highCpaThreshold;
-    }
-  });
-
-  const goodAds = data.filter(d => {
-    if (d.results === 0) return false;
-    if (isEcommerce) {
-        return d.roas > 2.0 || d.roas > avgRoas * 1.3;
-    } else {
-        return d.costPerResult < goodCpaThreshold;
-    }
-  });
-
-  // Categorize AdSets
-  const badAdSets = adSets.filter(s => {
-      if (s.spend < minSpendForDecision) return false;
-      if (isEcommerce) return s.roas < 1.0 || (s.roas < avgRoas * 0.8);
-      return s.results === 0 || s.cpa > highCpaThreshold;
-  });
-
-  const goodAdSets = adSets.filter(s => {
-      if (s.results === 0) return false;
-      if (isEcommerce) return s.roas > avgRoas * 1.2;
-      return s.cpa < goodCpaThreshold;
-  });
-
-  // Categorize Creatives (Aggregated)
-  const bestCreatives = creatives.filter(c => {
-      if (c.spend < minSpendForDecision) return false;
-      if (isEcommerce) return c.roas > avgRoas * 1.1; // Better than avg ROAS
-      return c.results > 3 && c.cpa < avgCpa; // Better than avg CPA with volume
-  }).sort((a,b) => isEcommerce ? b.roas - a.roas : a.cpa - b.cpa); // Sort by best metric
-
-  const worstCreatives = creatives.filter(c => {
-      if (c.spend < minSpendForDecision) return false;
-      if (isEcommerce) return c.roas < avgRoas * 0.8;
-      return (c.spend > avgCpa * 2 && c.results === 0) || c.cpa > highCpaThreshold;
-  }).sort((a,b) => b.spend - a.spend); // Sort by highest waste
-
-  // Calculate Wasted Budget
-  const wastedBudget = zeroResultAds.reduce((acc, curr) => acc + curr.amountSpent, 0) + 
-                       badAds.reduce((acc, curr) => acc + curr.amountSpent, 0);
-
-  // --- 4. Generate Markdown Report in Darija ---
-  let markdown = `## 📊 تقرير التحليل المباشر\n\n`;
-
-  // General Observations
-  markdown += `### 🧐 ملاحظات عامة\n`;
-  markdown += `المجموع ديال المصاريف هو **$${totalSpent.toLocaleString(undefined, {maximumFractionDigits:0})}** على **${adSets.length}** ديال المجموعات (AdSets).\n\n`;
-  
-  if (isEcommerce) {
-      markdown += `- **الـ ROAS العام:** ${avgRoas.toFixed(2)}. \n`;
-      markdown += avgRoas < 1.5 
-        ? `⚠️ رد البال، الـ ROAS طايح شوية. خاصك تراجع الـ Creative والـ Offer.` 
-        : `✅ الـ ROAS مزيان، كاين فرص باش تزيد فالميزانية.`;
-  } else {
-      markdown += `- **ثمن النتيجة المتوسط (Avg CPA):** $${avgCpa.toFixed(2)}. \n`;
-      markdown += `- كاين **${zeroResultAds.length}** إعلانات خسرات فلوس بلا ما تجيب حتى نتيجة.`;
-  }
-  markdown += `\n\n---\n\n`;
-
-  // --- AdSets Analysis Section ---
-  markdown += `### 📂 تحليل المجموعات (AdSets)\n`;
-  if (badAdSets.length > 0) {
-      markdown += `🔴 **مجموعات عيانة (خاصها تموت):**\n`;
-      badAdSets.sort((a,b) => b.spend - a.spend).slice(0, 3).forEach(set => {
-          if(isEcommerce) {
-              markdown += `- \`${set.name}\`: صرفات **$${set.spend.toFixed(2)}** و ROAS ديالها **${set.roas.toFixed(2)}** (ناقص).\n`;
-          } else {
-              markdown += `- \`${set.name}\`: صرفات **$${set.spend.toFixed(2)}** و CPA غالي **$${set.cpa.toFixed(2)}**.\n`;
-          }
-      });
-      markdown += `\n`;
-  }
-
-  if (goodAdSets.length > 0) {
-      markdown += `🟢 **مجموعات رابحة (خاصها تتزاد):**\n`;
-      goodAdSets.sort((a,b) => isEcommerce ? b.roas - a.roas : a.cpa - b.cpa).slice(0, 3).forEach(set => {
-          if(isEcommerce) {
-             markdown += `- \`${set.name}\`: ROAS **${set.roas.toFixed(2)}**.\n`;
-          } else {
-             markdown += `- \`${set.name}\`: CPA رخيص **$${set.cpa.toFixed(2)}**.\n`;
-          }
-      });
-  } else {
-      markdown += `ما كاينش فرق كبير بين الـ AdSets. ركز على تحسين الإعلانات (Creatives) داخل المجموعات.\n`;
-  }
-  markdown += `\n---\n\n`;
-
-  // --- Creatives Analysis Section (NEW) ---
-  markdown += `### 🎨 تحليل الكرياتيف (Creatives)\n`;
-  markdown += `هنا جمعنا الإعلانات اللي عندها نفس السمية (Ad Name) باش نعرفو أشنو اللي خدام ف ديزاين/فيديو.\n\n`;
-
-  if (bestCreatives.length > 0) {
-      markdown += `✅ **أفضل الكرياتيفات (Scale It):**\n`;
-      bestCreatives.slice(0, 3).forEach(c => {
-         if (isEcommerce) {
-             markdown += `- \`${c.name}\`: جاب ROAS واعر **${c.roas.toFixed(2)}** وصرف **$${c.spend.toFixed(2)}**.\n`;
-         } else {
-             markdown += `- \`${c.name}\`: جاب نتائج رخيصة بـ **$${c.cpa.toFixed(2)}** (مجموع ${c.results} نتيجة).\n`;
-         }
-      });
-      markdown += `\n`;
-  }
-
-  if (worstCreatives.length > 0) {
-      markdown += `🚫 **كرياتيفات عيانة (Kill It):**\n`;
-      worstCreatives.slice(0, 3).forEach(c => {
-          if (c.results === 0) {
-              markdown += `- \`${c.name}\`: صرف **$${c.spend.toFixed(2)}** وماجاب والو (0 Results).\n`;
-          } else if (isEcommerce) {
-              markdown += `- \`${c.name}\`: ROAS طايح **${c.roas.toFixed(2)}** واخا صرف **$${c.spend.toFixed(2)}**.\n`;
-          } else {
-              markdown += `- \`${c.name}\`: النتيجة غالية بزاف **$${c.cpa.toFixed(2)}**.\n`;
-          }
-      });
-      markdown += `\n`;
-  }
-
-  if (bestCreatives.length === 0 && worstCreatives.length === 0) {
-      markdown += `مازال ماكاينش داتا كافية باش نحكمو على الكرياتيف. خلي الحملة تزيد تخدم شوية.\n`;
-  }
-  
-  markdown += `\n---\n\n`;
-
-  // --- Ads Analysis Section (Individual Rows) ---
-  markdown += `### 🛑 شنو خاصك تحبس (Individual Ads)\n`;
-  if (zeroResultAds.length > 0 || badAds.length > 0) {
-      markdown += `ضيعتي تقريبا **$${wastedBudget.toFixed(2)}** ف إعلانات فردية عيانة:\n\n`;
+  // B. Bleeders: High Spend + Bad Performance (Kill immediately).
+  const bleeders = data.filter(d => {
+      if (d.results === 0) return false; // Handled by zombies
+      if (d.amountSpent < significanceThreshold) return false; // Not enough data yet
       
-      if (zeroResultAds.length > 0) {
-        markdown += `**1. إعلانات خسرات فلوس بلا نتيجة (Zero Results):**\n`;
-        zeroResultAds.sort((a,b) => b.amountSpent - a.amountSpent).slice(0, 5).forEach(ad => {
-             markdown += `- \`${ad.adName}\` (فـ ${ad.adSetName}): خسرات **$${ad.amountSpent.toFixed(2)}**.\n`;
-        });
-        markdown += `\n`;
-      }
+      if (isEcommerce) return d.roas < roasThreshold.bad;
+      return d.costPerResult > cpaThreshold.bad;
+  });
 
-      if (badAds.length > 0) {
-        markdown += `**2. إعلانات غالية بزاف (Bad Performance):**\n`;
-        badAds.sort((a,b) => isEcommerce ? a.roas - b.roas : b.costPerResult - a.costPerResult).slice(0, 5).forEach(ad => {
-            if (isEcommerce) {
-                 markdown += `- \`${ad.adName}\`: جابت ROAS عيان **${ad.roas.toFixed(2)}**.\n`;
-            } else {
-                 markdown += `- \`${ad.adName}\`: النتيجة طالعة بـ **$${ad.costPerResult.toFixed(2)}**.\n`;
-            }
-        });
-      }
+  // C. Winners (Scale): High Spend + Good Performance.
+  const winners = data.filter(d => {
+      if (d.results === 0) return false;
+      if (d.amountSpent < significanceThreshold) return false; // Needs volume
+      
+      if (isEcommerce) return d.roas >= roasThreshold.good;
+      return d.costPerResult <= cpaThreshold.good;
+  });
+
+  // D. Potentials: Low Spend + Good Performance (Test more).
+  const potentials = data.filter(d => {
+      if (d.results === 0) return false;
+      if (d.amountSpent >= significanceThreshold) return false; // Already scaled
+      
+      if (isEcommerce) return d.roas >= avgRoas; // At least average
+      return d.costPerResult <= avgCpa; // At least average
+  });
+
+  // Creative Analysis (Aggregated)
+  const topCreatives = creatives
+    .filter(c => c.spend > significanceThreshold && (isEcommerce ? c.roas > avgRoas : c.cpa < avgCpa))
+    .sort((a,b) => isEcommerce ? b.roas - a.roas : a.cpa - b.cpa);
+
+  const badCreatives = creatives
+    .filter(c => c.spend > significanceThreshold && (isEcommerce ? c.roas < roasThreshold.bad : c.cpa > cpaThreshold.bad))
+    .sort((a,b) => b.spend - a.spend);
+
+
+  // --- 5. Generate Markdown Report in Darija ---
+  let markdown = `## 📊 تقرير التحليل المعمق\n\n`;
+
+  // Section 1: Health Check
+  markdown += `### 🏥 الحالة العامة للحساب\n`;
+  markdown += `صرفتي فالمجموع **$${totalSpent.toLocaleString(undefined, {maximumFractionDigits:0})}** وجبتي **${totalResults}** نتيجة.\n`;
+  
+  if (totalResults === 0) {
+      markdown += `⚠️ **مشكل كبير:** مازال ما جبتي حتى نتيجة (Sales/Leads). تأكد واش الـ Pixel خدام مزيان أو واش الـ Offer ديالك مطلوب.\n`;
+  } else if (isEcommerce) {
+      markdown += `- **Moyenne ROAS:** ${avgRoas.toFixed(2)}. \n`;
+      markdown += `- **Break-even:** نتا اللي عارف المارج ديالك، ولكن أي حاجة تحت **${(avgRoas * 0.8).toFixed(2)}** كتعتبر عيانة مقارنة بالمعدل ديالك.\n`;
   } else {
-      markdown += `🎉 مبروك! ما عندكش شي إعلانات خايبة بزاف فالمستوى الفردي.\n`;
+      markdown += `- **Moyenne CPA:** $${avgCpa.toFixed(2)}. \n`;
+      markdown += `- أي نتيجة كتقام عليك بأكثر من **$${cpaThreshold.bad.toFixed(2)}** راها غالية بزاف.\n`;
   }
-  markdown += `\n\n---\n\n`;
+  markdown += `\n---\n\n`;
 
-  // What to Scale (Ads)
-  markdown += `### 🚀 أفضل الإعلانات (Top Individual Ads)\n`;
-  if (goodAds.length > 0) {
-      markdown += `هاد الإعلانات هي "الهمزة" ديالك:\n\n`;
-      goodAds.sort((a,b) => isEcommerce ? b.roas - a.roas : a.costPerResult - b.costPerResult).slice(0, 5).forEach(ad => {
-          if (isEcommerce) {
-              markdown += `- \`${ad.adName}\`: ROAS **${ad.roas.toFixed(2)}**.\n`;
-          } else {
-              markdown += `- \`${ad.adName}\`: رخيصة **$${ad.costPerResult.toFixed(2)}** وجايبة **${ad.results}** نتيجة.\n`;
-          }
+  // Section 2: Actionable Ads Analysis
+  markdown += `### 🚦 الإجراءات اللي خاصك دير دابا (Action Plan)\n\n`;
+
+  // 1. KILL (Zombies & Bleeders)
+  if (zombies.length > 0 || bleeders.length > 0) {
+      markdown += `#### 🛑 حبس هادشي دابا (Kill)\n`;
+      markdown += `هاد الإعلانات كتحرق ليك الفلوس بلا فايدة:\n`;
+      
+      if (zombies.length > 0) {
+          markdown += `**💀 إعلانات ميتة (0 Results):**\n`;
+          zombies.sort((a,b) => b.amountSpent - a.amountSpent).slice(0, 3).forEach(ad => {
+              markdown += `- \`${ad.adName}\`: كلات **$${ad.amountSpent.toFixed(2)}** وماجابت والو.\n`;
+          });
+      }
+      
+      if (bleeders.length > 0) {
+          markdown += `**💸 إعلانات خاسرة (High CPA/Low ROAS):**\n`;
+          bleeders.sort((a,b) => isEcommerce ? a.roas - b.roas : b.costPerResult - a.costPerResult).slice(0, 3).forEach(ad => {
+             const metric = isEcommerce ? `ROAS: ${ad.roas.toFixed(2)}` : `CPA: $${ad.costPerResult.toFixed(2)}`;
+             markdown += `- \`${ad.adName}\`: صرفات **$${ad.amountSpent.toFixed(2)}** ولكن ${metric}.\n`;
+          });
+      }
+      markdown += `\n`;
+  }
+
+  // 2. SCALE (Winners)
+  if (winners.length > 0) {
+      markdown += `#### 🔥 زيد فالبيجي لهادو (Scale)\n`;
+      markdown += `هادو هما الـ Winners ديالك، خدامين مزيان وصارفين تبارك الله:\n`;
+      winners.sort((a,b) => isEcommerce ? b.roas - a.roas : a.costPerResult - b.costPerResult).slice(0, 3).forEach(ad => {
+          const metric = isEcommerce ? `ROAS: ${ad.roas.toFixed(2)}` : `CPA: $${ad.costPerResult.toFixed(2)}`;
+          markdown += `- \`${ad.adName}\`: ${metric} (Results: ${ad.results}).\n`;
       });
-      markdown += `\n💡 **نصيحة:** حاول تدير Duplicate لهاد الإعلانات ف Campaign جديدة.\n`;
-  } else {
-      markdown += `مزال ما بانوش Winners واضحين.\n`;
+      markdown += `*نصيحة: زيد فالميزانية بـ 20% كل 2-3 أيام باش ما تخسرش الـ Optimization.*\n\n`;
   }
+
+  // 3. POTENTIAL (Test)
+  if (potentials.length > 0) {
+      markdown += `#### 💎 عطيهم فرصة (Potentials)\n`;
+      markdown += `هاد الإعلانات يالاه بدات ولكن المؤشرات ديالها خضرا. حاول تصبر عليها شوية:\n`;
+      potentials.sort((a,b) => isEcommerce ? b.roas - a.roas : a.costPerResult - b.costPerResult).slice(0, 3).forEach(ad => {
+           const metric = isEcommerce ? `ROAS: ${ad.roas.toFixed(2)}` : `CPA: $${ad.costPerResult.toFixed(2)}`;
+           markdown += `- \`${ad.adName}\`: صرفات قليل ($${ad.amountSpent.toFixed(2)}) ولكن ${metric} مزيان.\n`;
+      });
+      markdown += `\n`;
+  }
+
+  markdown += `---\n\n`;
+
+  // Section 3: Creative & AdSet Insights
+  markdown += `### 🧠 تحليل الكرياتيف و المجموعات\n\n`;
+  
+  // AdSets
+  markdown += `**📂 المجموعات (AdSets):**\n`;
+  const winningSets = adSets.filter(s => isEcommerce ? s.roas > avgRoas : s.cpa < avgCpa);
+  if (winningSets.length > 0) {
+      const topSet = winningSets.sort((a,b) => isEcommerce ? b.roas - a.roas : a.cpa - b.cpa)[0];
+      markdown += `- أحسن AdSet هي \`${topSet.name}\` بـ ${isEcommerce ? 'ROAS ' + topSet.roas.toFixed(2) : 'CPA $' + topSet.cpa.toFixed(2)}.\n`;
+  } else {
+      markdown += `- جميع الـ AdSets الأداء ديالها متقارب أو طايح.\n`;
+  }
+
+  // Creatives
+  markdown += `\n**🎨 الكرياتيف (Ads):**\n`;
+  if (topCreatives.length > 0) {
+      markdown += `أحسن فورما/فيديو خدام ليك هو \`${topCreatives[0].name}\`. \n`;
+      markdown += `حاول تصاوب إعلانات جديدة كتشبه لهاد الستيل (نفس الـ Hook أو الزاوية الإعلانية).\n`;
+  } else if (badCreatives.length > 0) {
+       markdown += `الكرياتيف \`${badCreatives[0].name}\` عيان بزاف. بدلو دغيا.\n`;
+  }
+  
+  markdown += `\n`;
 
   return {
     markdownReport: markdown,

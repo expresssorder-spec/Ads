@@ -19,6 +19,10 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
   // Determine if this is an e-commerce (ROAS based) or Lead/Message (CPA based) view
   const isEcommerce = analysis.summary.avgRoas > 0.5 || analysis.summary.dominantResultType === 'purchase';
 
+  // Metrics for coloring logic
+  const avgRoas = analysis.summary.avgRoas;
+  const avgCpa = analysis.summary.avgCpa;
+
   // Reset expanded row when search changes
   useEffect(() => {
     setExpandedRow(null);
@@ -63,6 +67,21 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
       String(item.adSetName).toLowerCase().includes(lowerTerm)
     );
   }, [data, searchTerm]);
+
+  // Helper to determine text color based on performance vs Average
+  const getPerformanceColor = (value: number, type: 'roas' | 'cpa') => {
+    if (type === 'roas') {
+        if (value >= avgRoas * 1.2) return 'text-green-600 font-bold';
+        if (value < avgRoas * 0.8) return 'text-red-600 font-bold';
+        return 'text-orange-500 font-medium';
+    } else {
+        // For CPA, Lower is better
+        if (value === 0) return 'text-gray-400';
+        if (value <= avgCpa * 0.8) return 'text-green-600 font-bold';
+        if (value >= avgCpa * 1.3) return 'text-red-600 font-bold';
+        return 'text-orange-500 font-medium';
+    }
+  };
 
   return (
     <div className="space-y-8 animate-fade-in pb-10">
@@ -127,7 +146,6 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
         ) : (
             <StatsCard 
             title="معدل النقر (CTR)" 
-            // Average CTR calculation naive
             value={`${(data.reduce((acc, curr) => acc + curr.ctr, 0) / (data.length || 1)).toFixed(2)}%`}
             icon={<Activity className="w-6 h-6" />}
             color="green"
@@ -142,8 +160,8 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
         <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
           <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-4">
             <h3 className="text-white font-bold text-lg flex items-center gap-2">
-              <span className="text-2xl">🤖</span>
-              تقرير التحليل
+              <span className="text-2xl">📊</span>
+              تقرير الأداء
             </h3>
           </div>
           <div className="p-6 prose prose-indigo max-w-none text-right flex-grow" dir="rtl">
@@ -151,14 +169,13 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
               components={{
                 h2: ({node, ...props}) => <h2 className="text-xl font-bold text-indigo-700 mt-6 mb-3 border-b pb-2" {...props} />,
                 h3: ({node, ...props}) => <h3 className="text-lg font-bold text-gray-800 mt-4 mb-2" {...props} />,
+                h4: ({node, ...props}) => <h4 className="text-md font-bold text-indigo-600 mt-3 mb-1" {...props} />,
                 ul: ({node, ...props}) => <ul className="list-disc mr-5 space-y-1 text-gray-700" {...props} />,
                 li: ({node, ...props}) => <li className="pl-1" {...props} />,
                 strong: ({node, ...props}) => <strong className="font-extrabold text-gray-900" {...props} />,
                 p: ({node, ...props}) => <p className="text-gray-700 leading-relaxed mb-4" {...props} />,
                 code: ({node, className, children, ...props}) => {
                   const text = String(children).replace(/\n$/, '');
-                  
-                  // Check if this text matches any Ad OR AdSet
                   const isMatch = data.some(d => {
                       const adName = String(d.adName || "");
                       const adSetName = String(d.adSetName || "");
@@ -206,7 +223,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
                             {isEcommerce ? (
                                 <Bar dataKey="roas" name="ROAS" radius={[0, 4, 4, 0]}>
                                     {chartData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.roas >= 2 ? '#10b981' : '#f43f5e'} />
+                                        <Cell key={`cell-${index}`} fill={entry.roas >= avgRoas ? '#10b981' : '#f43f5e'} />
                                     ))}
                                 </Bar>
                             ) : (
@@ -220,7 +237,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
                     </ResponsiveContainer>
                 </div>
                 <p className="text-xs text-gray-400 mt-4 text-center">
-                    {isEcommerce ? "الأخضر: ROAS طالع، الأحمر: ROAS هابط" : "البار كيمثل عدد النتائج (Leads/Messages)"}
+                    {isEcommerce ? "الأخضر: فوق المعدل، الأحمر: تحت المعدل" : "البار كيمثل عدد النتائج (Leads/Messages)"}
                 </p>
             </div>
 
@@ -289,9 +306,9 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
                       <td className="px-6 py-4 text-sm text-gray-600">
                         ${item.amountSpent.toFixed(2)}
                       </td>
-                      <td className="px-6 py-4 text-sm font-bold">
+                      <td className="px-6 py-4 text-sm">
                         {isEcommerce ? (
-                              <span className={`${item.roas >= 2 ? 'text-green-600' : item.roas >= 1 ? 'text-orange-500' : 'text-red-500'}`}>
+                              <span className={getPerformanceColor(item.roas, 'roas')}>
                                   {item.roas.toFixed(2)}x
                               </span>
                         ) : (
@@ -301,8 +318,10 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
                       <td className="px-6 py-4 text-sm text-gray-600">
                         {item.results}
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-600">
-                        ${item.costPerResult.toFixed(2)}
+                      <td className="px-6 py-4 text-sm">
+                        <span className={getPerformanceColor(item.costPerResult, 'cpa')}>
+                          ${item.costPerResult.toFixed(2)}
+                        </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600">
                         {isEcommerce ? `${item.ctr.toFixed(2)}%` : item.clicks}
