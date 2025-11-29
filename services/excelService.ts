@@ -22,10 +22,14 @@ export const parseExcelFile = async (file: File): Promise<AdData[]> => {
         }
 
         // --- 1. Dynamic Header Row Detection ---
-        // Scan first 20 rows to find the one with the most matching keywords
+        // Scan first 25 rows to find the one with the most matching keywords
         let headerRowIndex = 0;
         let maxMatches = 0;
-        const keywords = ['campaign', 'ad name', 'ad set', 'results', 'amount spent', 'impressions', 'إعلان', 'حملة', 'نتائج', 'publicité'];
+        // Added 'campagne', 'montant', 'nom', 'dépensé' for better French detection
+        const keywords = [
+            'campaign', 'ad name', 'ad set', 'results', 'amount spent', 'impressions', 
+            'إعلان', 'حملة', 'نتائج', 'publicité', 'campagne', 'montant', 'dépensé', 'nom'
+        ];
 
         for (let i = 0; i < Math.min(jsonData.length, 25); i++) {
             const row = (jsonData[i] as any[]).map(c => c ? c.toString().toLowerCase() : '');
@@ -37,44 +41,59 @@ export const parseExcelFile = async (file: File): Promise<AdData[]> => {
         }
 
         if (maxMatches < 2) {
-             // Fallback: If we couldn't confidently find a header row, assume row 0 or try to proceed
              console.warn("Could not detect header row confidently. Defaulting to 0.");
              headerRowIndex = 0;
         }
 
         // --- 2. Extract Headers and Data ---
         const rawHeaders = (jsonData[headerRowIndex] as string[]) || [];
-        const headers = rawHeaders.map(h => 
-            h ? h.toString().toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]/g, '') : ''
-        );
+        
+        // Normalize headers for comparison (remove special chars, lowercase)
+        // Note: We allow basic latin chars to handle accents properly by NOT stripping everything initially if possible,
+        // but for robustness we strip non-alphanumeric except Arabic. 
+        // To support 'publicité' (é), we should include extended latin or just fuzzy match base chars.
+        // Strategy: Strip strict non-alphanumeric but keep arabic. 
+        // 'Nom de la campagne' -> 'nomdelacampagne'
+        // 'Publicité' -> 'publicit' (if é is stripped) or 'publicité' if allowed.
+        // Let's rely on stripping accents/special chars for easier matching.
+        
+        const normalize = (str: string) => {
+            if (!str) return '';
+            return str.toLowerCase()
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove accents (é -> e)
+                .replace(/[^a-z0-9\u0600-\u06FF]/g, ''); // Remove non-alphanumeric
+        };
+
+        const headers = rawHeaders.map(h => normalize(h.toString()));
         
         const rows = jsonData.slice(headerRowIndex + 1);
 
-        // Helper to find column index based on possible keywords (fuzzy match)
+        // Helper to find column index based on possible keywords
         const findIndex = (possibleNames: string[]) => {
-            const normalizedNames = possibleNames.map(n => n.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]/g, ''));
+            const normalizedKeywords = possibleNames.map(n => normalize(n));
             return headers.findIndex(h => 
-                normalizedNames.some(name => h.includes(name))
+                normalizedKeywords.some(keyword => h.includes(keyword))
             );
         };
 
         // Comprehensive mapping for EN, FR, AR
         const idxMap = {
-          campaign: findIndex(['campaign name', 'campaign', 'campagne', 'اسم الحملة']),
-          adSet: findIndex(['ad set name', 'ad set', 'adset', 'ensemble de publicités', 'المجموعة الإعلانية']),
-          ad: findIndex(['ad name', 'ad', 'publicité', 'name', 'اسم الإعلان']),
+          campaign: findIndex(['nom de la campagne', 'campaign name', 'campaign', 'campagne', 'اسم الحملة']),
+          adSet: findIndex(['nom de l\'ensemble', 'ad set name', 'ad set', 'adset', 'ensemble de publicités', 'المجموعة الإعلانية']),
+          ad: findIndex(['nom de la publicité', 'ad name', 'ad', 'publicité', 'name', 'اسم الإعلان']),
           spent: findIndex(['amount spent', 'spend', 'montant dépensé', 'cost', 'المبلغ الذي تم إنفاقه', 'depense', 'amountspent']),
           impressions: findIndex(['impressions', 'مرات الظهور']),
           clicks: findIndex(['link clicks', 'clicks', 'clics', 'النقرات']),
           ctr: findIndex(['ctr', 'click-through rate', 'taux de clics', 'نسبة النقر']),
-          cpc: findIndex(['cpc', 'cost per click', 'coût par clic']),
-          results: findIndex(['results', 'résultats', 'result', 'purchases', 'leads', 'messaging conversations', 'النتائج']),
-          cpa: findIndex(['cost per result', 'coût par résultat', 'cpr', 'cost per purchase', 'التكلفة لكل نتيجة']),
+          cpc: findIndex(['cpc', 'cost per click', 'coût par clic', 'cout par clic']),
+          results: findIndex(['results', 'résultats', 'resultats', 'result', 'purchases', 'leads', 'messaging conversations', 'النتائج']),
+          cpa: findIndex(['cost per result', 'coût par résultat', 'cout par resultat', 'cpr', 'cost per purchase', 'التكلفة لكل نتيجة']),
           roas: findIndex(['purchase roas', 'roas', 'return on ad spend', 'retour sur les dépenses', 'عائد الإنفاق', 'roasachats']),
         };
 
         if (idxMap.spent === -1) {
-             reject(new Error("ماقدرناش نلقاو خانة المصاريف (Amount Spent). تأكد أن الملف فيه هاد المعلومة."));
+             // Try fallback for 'Amount Spent' if exact match failed
+             reject(new Error("ماقدرناش نلقاو خانة المصاريف (Montant dépensé / Amount Spent). تأكد أن الملف فيه هاد المعلومة."));
              return;
         }
 
@@ -106,23 +125,18 @@ export const parseExcelFile = async (file: File): Promise<AdData[]> => {
 
             // Heuristic for format detection
             if (hasDot && hasComma) {
-                // Determine which is last. The last separator is usually the decimal.
                 if (str.lastIndexOf(',') > str.lastIndexOf('.')) {
-                    // Format: 1.234,56 (EU/Morocco) -> Replace dots, swap comma to dot
+                    // 1.234,56 (EU/FR)
                     str = str.replace(/\./g, '').replace(',', '.');
                 } else {
-                    // Format: 1,234.56 (US) -> Remove commas
+                    // 1,234.56 (US)
                     str = str.replace(/,/g, '');
                 }
             } else if (hasComma) {
-                // Only comma: 1234,56 or 1,234 (Ambiguous)
-                // In Moroccan/French context, comma is usually decimal.
-                // Exception: If it looks like US integer 1,000 (length - index == 4)
-                // But generally safe to replace comma with dot for ad metrics which often have decimals.
+                // 1234,56 or 1,234. In Ads context usually decimal.
                 str = str.replace(',', '.');
             }
-            // If only dot: 1234.56 (Standard) -> keep as is.
-
+            
             return parseFloat(str.replace(/[^0-9.-]/g, '')) || 0;
         };
 
@@ -135,7 +149,7 @@ export const parseExcelFile = async (file: File): Promise<AdData[]> => {
         const parsedData: AdData[] = rows.map((row: any) => {
             const spent = parseNumber(row[idxMap.spent]);
             
-            // Skip summary rows (often total rows at bottom have no Ad Name)
+            // Skip summary rows
             if (!row[idxMap.ad] && !row[idxMap.campaign]) return null;
 
             return {
@@ -153,7 +167,7 @@ export const parseExcelFile = async (file: File): Promise<AdData[]> => {
                 currency: 'USD',
                 resultType: detectedResultType
             };
-        }).filter((item): item is AdData => item !== null && item.amountSpent > 0); // Type guard and filter
+        }).filter((item): item is AdData => item !== null && item.amountSpent > 0); 
 
         if (parsedData.length === 0) {
             reject(new Error("ما لقينا حتى إعلان فيه صرف (Amount Spent > 0). تأكد من الملف والعناوين."));
