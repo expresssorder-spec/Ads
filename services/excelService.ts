@@ -126,17 +126,22 @@ export const parseExcelFile = async (file: File): Promise<AdData[]> => {
             return parseFloat(str.replace(/[^0-9.-]/g, '')) || 0;
         };
 
+        // --- 4. Safe String Helper ---
+        const safeString = (val: any, defaultVal: string): string => {
+            if (val === undefined || val === null) return defaultVal;
+            return String(val).trim();
+        };
+
         const parsedData: AdData[] = rows.map((row: any) => {
             const spent = parseNumber(row[idxMap.spent]);
             
             // Skip summary rows (often total rows at bottom have no Ad Name)
-            // But sometimes summary rows have "Results" text in first column
             if (!row[idxMap.ad] && !row[idxMap.campaign]) return null;
 
             return {
-                campaignName: idxMap.campaign !== -1 ? (row[idxMap.campaign] || 'Unknown Campaign') : 'Unknown Campaign',
-                adSetName: idxMap.adSet !== -1 ? (row[idxMap.adSet] || 'Unknown AdSet') : 'Unknown AdSet',
-                adName: idxMap.ad !== -1 ? (row[idxMap.ad] || row[0] || 'Unknown Ad') : (row[0] || 'Unknown Ad'),
+                campaignName: idxMap.campaign !== -1 ? safeString(row[idxMap.campaign], 'Unknown Campaign') : 'Unknown Campaign',
+                adSetName: idxMap.adSet !== -1 ? safeString(row[idxMap.adSet], 'Unknown AdSet') : 'Unknown AdSet',
+                adName: idxMap.ad !== -1 ? safeString(row[idxMap.ad], safeString(row[0], 'Unknown Ad')) : safeString(row[0], 'Unknown Ad'),
                 amountSpent: spent,
                 impressions: parseNumber(row[idxMap.impressions]),
                 clicks: parseNumber(row[idxMap.clicks]),

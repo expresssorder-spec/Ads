@@ -44,9 +44,9 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
     if (!searchTerm) return data;
     const lowerTerm = searchTerm.toLowerCase();
     return data.filter(item => 
-      item.adName.toLowerCase().includes(lowerTerm) ||
-      item.campaignName.toLowerCase().includes(lowerTerm) ||
-      item.adSetName.toLowerCase().includes(lowerTerm)
+      String(item.adName).toLowerCase().includes(lowerTerm) ||
+      String(item.campaignName).toLowerCase().includes(lowerTerm) ||
+      String(item.adSetName).toLowerCase().includes(lowerTerm)
     );
   }, [data, searchTerm]);
 
@@ -129,7 +129,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
           <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-4">
             <h3 className="text-white font-bold text-lg flex items-center gap-2">
               <span className="text-2xl">🤖</span>
-              تقرير الذكاء الاصطناعي (Gemini)
+              تقرير التحليل
             </h3>
           </div>
           <div className="p-6 prose prose-indigo max-w-none text-right flex-grow" dir="rtl">
@@ -143,7 +143,11 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
                 p: ({node, ...props}) => <p className="text-gray-700 leading-relaxed mb-4" {...props} />,
                 code: ({node, className, children, ...props}) => {
                   const text = String(children).replace(/\n$/, '');
-                  const isAd = data.some(d => d.adName.includes(text) || text.includes(d.adName));
+                  // Safer check ensuring d.adName is treated as string
+                  const isAd = data.some(d => {
+                      const name = String(d.adName || "");
+                      return name.includes(text) || text.includes(name);
+                  });
                   
                   if (isAd) {
                     return (

@@ -21,10 +21,20 @@ function App() {
       setData(parsedData);
       
       setAppState(AppState.ANALYZING);
-      const result = await analyzeAds(parsedData);
-      setAnalysis(result);
       
-      setAppState(AppState.SUCCESS);
+      // Allow UI to paint the loading state before blocking with analysis
+      setTimeout(async () => {
+        try {
+            const result = await analyzeAds(parsedData);
+            setAnalysis(result);
+            setAppState(AppState.SUCCESS);
+        } catch (err: any) {
+            console.error(err);
+            setError(err.message || "وقع شي مشكل ف التحليل");
+            setAppState(AppState.ERROR);
+        }
+      }, 50);
+
     } catch (err: any) {
       console.error(err);
       setError(err.message || "وقع شي مشكل ف معالجة الملف");
@@ -68,7 +78,7 @@ function App() {
           </div>
         )}
 
-        {/* State: IDLE or PARSING */}
+        {/* State: IDLE or PARSING or ERROR */}
         {(appState === AppState.IDLE || appState === AppState.PARSING || appState === AppState.ERROR) && (
           <div className="max-w-2xl mx-auto">
             <div className="text-center mb-10">

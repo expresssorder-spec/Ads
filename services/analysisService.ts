@@ -1,6 +1,9 @@
 import { AdData, AnalysisResult } from '../types';
 
 export const analyzeAds = async (data: AdData[]): Promise<AnalysisResult> => {
+  // Simulate async processing to allow UI to render loading state
+  await new Promise(resolve => setTimeout(resolve, 100));
+
   // 1. Calculate Summary Stats
   const totalSpent = data.reduce((sum, item) => sum + item.amountSpent, 0);
   const totalRevenue = data.reduce((sum, item) => sum + (item.amountSpent * item.roas), 0);
@@ -8,20 +11,24 @@ export const analyzeAds = async (data: AdData[]): Promise<AnalysisResult> => {
   const avgRoas = totalSpent > 0 ? totalRevenue / totalSpent : 0;
   const avgCpa = totalResults > 0 ? totalSpent / totalResults : 0;
   
-  // Detect Context
-  const resultTypes = data.map(d => d.resultType);
-  const dominantResultType = resultTypes.sort((a,b) =>
-        resultTypes.filter(v => v===a).length - resultTypes.filter(v => v===b).length
-  ).pop() || 'generic';
+  // Detect Context (Optimized Performance)
+  const counts: Record<string, number> = {};
+  for (const item of data) {
+    counts[item.resultType] = (counts[item.resultType] || 0) + 1;
+  }
+  
+  const dominantResultType = Object.keys(counts).reduce((a, b) => 
+    (counts[a] > counts[b] ? a : b), 'generic'
+  );
   
   const isEcommerce = avgRoas > 0.5 || dominantResultType === 'purchase';
 
   // 2. Deep Analysis Logic
   
   // Thresholds
-  const highCpaThreshold = avgCpa * 1.3; // 30% more expensive than average
-  const goodCpaThreshold = avgCpa * 0.8; // 20% cheaper than average
-  const minSpendForDecision = totalSpent / data.length * 0.2; // Ignore ads with very low spend relative to others
+  const highCpaThreshold = avgCpa > 0 ? avgCpa * 1.3 : 0; // 30% more expensive than average
+  const goodCpaThreshold = avgCpa > 0 ? avgCpa * 0.8 : 0; // 20% cheaper than average
+  const minSpendForDecision = data.length > 0 ? (totalSpent / data.length) * 0.2 : 0; // Ignore ads with very low spend relative to others
 
   // Categorize Ads
   const zeroResultAds = data.filter(d => d.amountSpent > minSpendForDecision && d.results === 0);
@@ -109,9 +116,6 @@ export const analyzeAds = async (data: AdData[]): Promise<AnalysisResult> => {
   } else {
       markdown += `مزال ما بانوش Winners واضحين. جرب Creatives جداد باش تهرس الـ Avg CPA الحالي.\n`;
   }
-
-  // Artificial delay to simulate processing time slightly (optional, for UX)
-  await new Promise(resolve => setTimeout(resolve, 800));
 
   return {
     markdownReport: markdown,
