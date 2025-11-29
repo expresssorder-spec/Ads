@@ -39,8 +39,8 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
       }));
   }, [data]);
 
-  const handleAdClick = (adName: string) => {
-    setSearchTerm(adName);
+  const handleEntityClick = (name: string) => {
+    setSearchTerm(name);
     if (tableRef.current) {
       tableRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -138,7 +138,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* Gemini Report Section */}
+        {/* Report Section */}
         <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
           <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-4">
             <h3 className="text-white font-bold text-lg flex items-center gap-2">
@@ -157,16 +157,19 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
                 p: ({node, ...props}) => <p className="text-gray-700 leading-relaxed mb-4" {...props} />,
                 code: ({node, className, children, ...props}) => {
                   const text = String(children).replace(/\n$/, '');
-                  // Safer check ensuring d.adName is treated as string
-                  const isAd = data.some(d => {
-                      const name = String(d.adName || "");
-                      return name.includes(text) || text.includes(name);
+                  
+                  // Check if this text matches any Ad OR AdSet
+                  const isMatch = data.some(d => {
+                      const adName = String(d.adName || "");
+                      const adSetName = String(d.adSetName || "");
+                      return adName.includes(text) || text.includes(adName) || 
+                             adSetName.includes(text) || text.includes(adSetName);
                   });
                   
-                  if (isAd) {
+                  if (isMatch) {
                     return (
                       <button 
-                        onClick={() => handleAdClick(text)}
+                        onClick={() => handleEntityClick(text)}
                         className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-2 py-0.5 rounded-md text-sm font-bold transition-all mx-1 inline-flex items-center gap-1 border border-indigo-200 cursor-pointer"
                         title="عرض التفاصيل في الجدول"
                       >
@@ -246,7 +249,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
           <div className="relative w-full sm:w-64">
             <input 
               type="text" 
-              placeholder="بحث عن إعلان..." 
+              placeholder="بحث عن إعلان أو مجموعة..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-4 pr-10 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-right"
@@ -278,7 +281,10 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ data, analysis, onReset }) 
                     >
                       <td className="px-6 py-4 text-sm font-medium text-gray-900 max-w-xs truncate flex items-center gap-2" title={item.adName}>
                          {expandedRow === index ? <ChevronUp size={16} className="text-indigo-600 min-w-4" /> : <ChevronDown size={16} className="text-gray-400 min-w-4" />}
-                         <span className="truncate">{item.adName}</span>
+                         <div className="flex flex-col truncate">
+                           <span className="truncate font-bold">{item.adName}</span>
+                           <span className="text-xs text-gray-500 truncate">{item.adSetName}</span>
+                         </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600">
                         ${item.amountSpent.toFixed(2)}
