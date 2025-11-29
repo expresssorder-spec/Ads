@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { parseExcelFile } from './services/excelService';
-import { analyzeAdsWithGemini } from './services/geminiService';
+import { analyzeAds } from './services/analysisService';
 import FileUpload from './components/FileUpload';
 import AnalysisView from './components/AnalysisView';
 import { AdData, AnalysisResult, AppState } from './types';
-import { LayoutDashboard, AlertCircle, Loader2 } from 'lucide-react';
+import { LayoutDashboard, AlertCircle } from 'lucide-react';
 
 function App() {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
@@ -21,7 +21,7 @@ function App() {
       setData(parsedData);
       
       setAppState(AppState.ANALYZING);
-      const result = await analyzeAdsWithGemini(parsedData);
+      const result = await analyzeAds(parsedData);
       setAnalysis(result);
       
       setAppState(AppState.SUCCESS);
@@ -52,7 +52,7 @@ function App() {
             <span className="font-bold text-xl tracking-tight text-gray-800">Mouhallil Ads</span>
           </div>
           <div className="text-sm font-medium text-gray-500 hidden sm:block">
-            Gemini AI Powered 🇲🇦
+            تحليل دقيق بلا ذكاء اصطناعي 📊
           </div>
         </div>
       </nav>
@@ -74,10 +74,10 @@ function App() {
             <div className="text-center mb-10">
               <h1 className="text-4xl font-extrabold text-gray-900 mb-4 leading-tight">
                 حلل إعلانات الفيسبوك ديالك <br />
-                <span className="text-indigo-600">بالذكاء الاصطناعي</span>
+                <span className="text-indigo-600">بشكل معمق وتلقائي</span>
               </h1>
               <p className="text-lg text-gray-600">
-                حط الملف ديال الحملة (Export) وحنا غانعطيوك تقرير كامل بالدارجة، شنو تزيد وشنو تنقص باش تطلع الـ ROAS.
+                حط الملف ديال الحملة (Export) وغادي نعطيوك تقرير مفصل بالدارجة: فين مشات فلوسك وشنو خاصك دير.
               </p>
             </div>
             
@@ -94,11 +94,11 @@ function App() {
              <div className="relative">
                 <div className="w-20 h-20 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
                 <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-2xl">🤖</span>
+                    <span className="text-2xl">📊</span>
                 </div>
              </div>
-             <h2 className="text-2xl font-bold text-gray-800 mt-8">كنحللو ف الداتا ديالك...</h2>
-             <p className="text-gray-500 mt-2">Gemini خدام كيقرا الأرقام باش يعطيك الخلاصة</p>
+             <h2 className="text-2xl font-bold text-gray-800 mt-8">جاري حساب الأرقام...</h2>
+             <p className="text-gray-500 mt-2">كنقارنو الـ CPA والـ ROAS باش نجبدو ليك الصح</p>
           </div>
         )}
 
